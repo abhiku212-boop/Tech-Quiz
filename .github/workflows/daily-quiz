@@ -1,0 +1,56 @@
+name: Daily quiz
+
+on:
+  schedule:
+    # GitHub cron is always UTC. 03:30 UTC = 09:00 IST.
+    # Runs are queued, not guaranteed on the minute - a 5-30 minute delay is
+    # normal and harmless here, since the 20h gap guard in the app only cares
+    # that roughly a day has passed.
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Post even if one already went out inside the gap guard'
+        type: boolean
+        default: false
+
+# A manual run started while the scheduled one is still going would otherwise
+# race it and could post twice.
+concurrency:
+  group: daily-quiz
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Post daily interview question
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          # Optional. An unset repository variable arrives as an empty string,
+          # which src/config.js already reads as "use the default". Only the
+          # numeric knobs (QUIZ_MIN_GAP_HOURS, QUIZ_CLOSE_AFTER_HOURS,
+          # QUIZ_HISTORY_LIMIT, QUIZ_OPEN_PERIOD) cannot be passed empty - an
+          # empty string parses as 0 there, which means "disabled". Leave them
+          # out unless you set a real value.
+          TELEGRAM_TOPIC_ID: ${{ vars.TELEGRAM_TOPIC_ID }}
+          QUIZ_DIFFICULTY: ${{ vars.QUIZ_DIFFICULTY }}
+          QUIZ_TOPICS: ${{ vars.QUIZ_TOPICS }}
+        run: node scripts/postNow.js ${{ inputs.force && '--force' || '' }}
